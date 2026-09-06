@@ -275,3 +275,5 @@ export const PaymentDetailScreen: React.FC<PaymentDetailScreenProps> = ({ curren
     </div>
   );
 };
+
+export default PaymentDetailScreen;

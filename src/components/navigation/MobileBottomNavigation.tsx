@@ -18,13 +18,16 @@ export const MobileBottomNavigation: React.FC<MobileBottomNavigationProps> = ({
   const navigate = useNavigate();
   const [activeTokenNumber, setActiveTokenNumber] = useState<number | null>(null);
 
-  const checkActiveBooking = async () => {
+  const checkActiveBooking = () => {
     const farmer = dataStore.getCurrentFarmer();
     if (!farmer) {
       setActiveTokenNumber(null);
       return;
     }
-    const active = await bookingService.getActiveBooking(farmer.id);
+    const bookings = dataStore.getBookings().filter((b) => b.farmerId === farmer.id);
+    const active = bookings.find(
+      (b) => b.status === 'confirmed' && b.currentStage !== 'COMPLETED'
+    ) || bookings[0];
     if (active && active.currentStage !== 'COMPLETED' && active.status === 'confirmed') {
       setActiveTokenNumber(active.tokenNumber);
     } else {

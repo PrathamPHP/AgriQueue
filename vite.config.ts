@@ -10,6 +10,29 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-router-dom',
+      'd3',
+      'topojson-client',
+      'lucide-react',
+      'clsx',
+      'tailwind-merge',
+    ],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/d3') || id.includes('node_modules/topojson-client')) {
+            return 'vendor-map';
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     open: false,

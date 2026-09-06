@@ -233,6 +233,27 @@ export async function getStateStats(req: Request, res: Response, next: NextFunct
       where: { booking: { centreId: { in: centreIds } } },
     });
 
+    // Index bookings, queues, and payments by district and bookingId for O(1) access
+    const districtBookingMap = new Map<string, typeof bookings>();
+    for (const b of bookings) {
+      let list = districtBookingMap.get(b.districtId);
+      if (!list) {
+        list = [];
+        districtBookingMap.set(b.districtId, list);
+      }
+      list.push(b);
+    }
+
+    const queueByBookingId = new Map<string, (typeof queueEntries)[0]>();
+    for (const q of queueEntries) {
+      queueByBookingId.set(q.bookingId, q);
+    }
+
+    const paymentsByBookingId = new Map<string, (typeof payments)[0]>();
+    for (const p of payments) {
+      paymentsByBookingId.set(p.bookingId, p);
+    }
+
     const districtSummaries = [];
     let totalBookingsToday = 0;
     let currentlyWaiting = 0;
@@ -245,14 +266,7 @@ export async function getStateStats(req: Request, res: Response, next: NextFunct
 
     for (const district of state.districts) {
       const dCentres = district.centres;
-      const dCentreIds = new Set(dCentres.map((c) => c.id));
-
-      const dBookings = bookings.filter((b) => dCentreIds.has(b.centreId));
-      const dQueues = queueEntries.filter((q) => dCentreIds.has(q.centreId));
-      const dPayments = payments.filter((p) => {
-        const b = dBookings.find((cb) => cb.id === p.bookingId);
-        return Boolean(b);
-      });
+      const dBookings = districtBookingMap.get(district.id) || [];
 
       const dCompleted = dBookings.filter((b) => b.currentStage === 'COMPLETED');
       const dWaiting = dBookings.filter(
@@ -262,6 +276,10 @@ export async function getStateStats(req: Request, res: Response, next: NextFunct
         (sum, b) => sum + (b.acceptedQuantityKg || b.quantityKg || 0),
         0
       );
+
+      const dPayments = dBookings
+        .map((b) => paymentsByBookingId.get(b.id))
+        .filter((p): p is (typeof payments)[0] => Boolean(p));
 
       const dDisbursed = dPayments
         .filter((p) => p.status === 'PAID')
@@ -273,7 +291,9 @@ export async function getStateStats(req: Request, res: Response, next: NextFunct
 
       let dWait = 0;
       if (dWaiting.length > 0) {
-        const wQueues = dQueues.filter((q) => dWaiting.some((b) => b.id === q.bookingId));
+        const wQueues = dWaiting
+          .map((b) => queueByBookingId.get(b.id))
+          .filter((q): q is (typeof queueEntries)[0] => Boolean(q));
         if (wQueues.length > 0) {
           dWait = Math.round(
             wQueues.reduce((s, q) => s + q.estimatedWaitingMinutes, 0) / wQueues.length
@@ -340,7 +360,7 @@ export async function getStateStats(req: Request, res: Response, next: NextFunct
 
 export async function getNationalStats(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const [states, bookings, queueEntries, payments, farmersCount] = await Promise.all([
+    const [states, bookingGroups, payments, queueEntries, farmersCount] = await Promise.all([
       prisma.state.findMany({
         include: {
           districts: {
@@ -349,11 +369,88 @@ export async function getNationalStats(_req: Request, res: Response, next: NextF
         },
         orderBy: { name: 'asc' },
       }),
-      prisma.booking.findMany(),
-      prisma.queueEntry.findMany(),
-      prisma.payment.findMany(),
+      prisma.booking.groupBy({
+        by: ['stateId', 'currentStage'],
+        _count: { id: true },
+        _sum: { acceptedQuantityKg: true, quantityKg: true },
+      }),
+      prisma.payment.findMany({
+        select: {
+          amount: true,
+          status: true,
+          booking: {
+            select: { stateId: true },
+          },
+        },
+      }),
+      prisma.queueEntry.findMany({
+        where: {
+          isQueueActive: true,
+          estimatedWaitingMinutes: { gt: 0 },
+        },
+        select: {
+          estimatedWaitingMinutes: true,
+          booking: {
+            select: { stateId: true, currentStage: true },
+          },
+        },
+      }),
       prisma.farmer.count(),
     ]);
+
+    // Build O(1) state lookup maps
+    const stateBookingMap = new Map<
+      string,
+      { total: number; waiting: number; completed: number; procuredKg: number }
+    >();
+
+    for (const bg of bookingGroups) {
+      const sId = bg.stateId;
+      if (!sId) continue;
+      let curr = stateBookingMap.get(sId);
+      if (!curr) {
+        curr = { total: 0, waiting: 0, completed: 0, procuredKg: 0 };
+        stateBookingMap.set(sId, curr);
+      }
+      curr.total += bg._count.id;
+      if (bg.currentStage === 'BOOKED' || bg.currentStage === 'ARRIVED') {
+        curr.waiting += bg._count.id;
+      }
+      if (bg.currentStage === 'COMPLETED') {
+        curr.completed += bg._count.id;
+        curr.procuredKg += bg._sum.acceptedQuantityKg ?? bg._sum.quantityKg ?? 0;
+      }
+    }
+
+    const statePaymentMap = new Map<string, { disbursed: number; pending: number }>();
+    for (const p of payments) {
+      const sId = p.booking?.stateId;
+      if (!sId) continue;
+      let curr = statePaymentMap.get(sId);
+      if (!curr) {
+        curr = { disbursed: 0, pending: 0 };
+        statePaymentMap.set(sId, curr);
+      }
+      if (p.status === 'PAID') {
+        curr.disbursed += p.amount;
+      } else if (p.status === 'PENDING' || p.status === 'INITIATED') {
+        curr.pending += p.amount;
+      }
+    }
+
+    const stateWaitMap = new Map<string, { sum: number; count: number }>();
+    for (const q of queueEntries) {
+      const sId = q.booking?.stateId;
+      const stage = q.booking?.currentStage;
+      if (!sId || (stage !== 'BOOKED' && stage !== 'ARRIVED')) continue;
+      let curr = stateWaitMap.get(sId);
+      if (!curr) {
+        curr = { sum: 0, count: 0 };
+        stateWaitMap.set(sId, curr);
+      }
+      curr.sum += q.estimatedWaitingMinutes;
+      curr.count += 1;
+    }
 
     const stateSummaries = [];
     let totalDistricts = 0;
@@ -371,42 +468,12 @@ export async function getNationalStats(_req: Request, res: Response, next: NextF
     for (const state of states) {
       const sDistricts = state.districts;
       const sCentres = sDistricts.flatMap((d) => d.centres);
-      const sCentreIds = new Set(sCentres.map((c) => c.id));
+      const bData = stateBookingMap.get(state.id) || { total: 0, waiting: 0, completed: 0, procuredKg: 0 };
+      const pData = statePaymentMap.get(state.id) || { disbursed: 0, pending: 0 };
+      const wData = stateWaitMap.get(state.id);
 
-      const sBookings = bookings.filter((b) => sCentreIds.has(b.centreId));
-      const sQueues = queueEntries.filter((q) => sCentreIds.has(q.centreId));
-      const sPayments = payments.filter((p) => {
-        const b = sBookings.find((cb) => cb.id === p.bookingId);
-        return Boolean(b);
-      });
-
-      const sCompleted = sBookings.filter((b) => b.currentStage === 'COMPLETED');
-      const sWaiting = sBookings.filter(
-        (b) => b.currentStage === 'BOOKED' || b.currentStage === 'ARRIVED'
-      );
-      const sProcuredKg = sCompleted.reduce(
-        (sum, b) => sum + (b.acceptedQuantityKg || b.quantityKg || 0),
-        0
-      );
-      const sProcuredTonnes = Math.round(sProcuredKg / 10) / 100;
-
-      const sDisbursed = sPayments
-        .filter((p) => p.status === 'PAID')
-        .reduce((sum, p) => sum + p.amount, 0);
-
-      const sPending = sPayments
-        .filter((p) => p.status === 'PENDING' || p.status === 'INITIATED')
-        .reduce((sum, p) => sum + p.amount, 0);
-
-      let sWait = 0;
-      if (sWaiting.length > 0) {
-        const wQueues = sQueues.filter((q) => sWaiting.some((b) => b.id === q.bookingId));
-        if (wQueues.length > 0) {
-          sWait = Math.round(
-            wQueues.reduce((s, q) => s + q.estimatedWaitingMinutes, 0) / wQueues.length
-          );
-        }
-      }
+      const sProcuredTonnes = Math.round(bData.procuredKg / 10) / 100;
+      const sWait = wData && wData.count > 0 ? Math.round(wData.sum / wData.count) : 0;
 
       stateSummaries.push({
         stateId: state.id,
@@ -415,24 +482,24 @@ export async function getNationalStats(_req: Request, res: Response, next: NextF
         totalDistricts: sDistricts.length,
         totalCentres: sCentres.length,
         activeCentres: sCentres.filter((c) => c.operationalStatus !== 'CLOSED').length,
-        totalBookingsToday: sBookings.length,
-        currentlyWaiting: sWaiting.length,
-        completedToday: sCompleted.length,
+        totalBookingsToday: bData.total,
+        currentlyWaiting: bData.waiting,
+        completedToday: bData.completed,
         totalProcuredTonnes: sProcuredTonnes,
-        totalDisbursedAmount: sDisbursed,
-        pendingDisbursementAmount: sPending,
+        totalDisbursedAmount: pData.disbursed,
+        pendingDisbursementAmount: pData.pending,
         avgWaitTimeMin: sWait,
       });
 
       totalDistricts += sDistricts.length;
       totalCentres += sCentres.length;
       activeCentres += sCentres.filter((c) => c.operationalStatus !== 'CLOSED').length;
-      totalBookingsToday += sBookings.length;
-      currentlyWaiting += sWaiting.length;
-      completedToday += sCompleted.length;
-      totalProcuredKg += sProcuredKg;
-      totalDisbursedAmount += sDisbursed;
-      pendingDisbursementAmount += sPending;
+      totalBookingsToday += bData.total;
+      currentlyWaiting += bData.waiting;
+      completedToday += bData.completed;
+      totalProcuredKg += bData.procuredKg;
+      totalDisbursedAmount += pData.disbursed;
+      pendingDisbursementAmount += pData.pending;
 
       if (sWait > 0) {
         totalWaitTimeSum += sWait;
@@ -469,31 +536,46 @@ export async function getNationalStats(_req: Request, res: Response, next: NextF
 
 export async function getAdminAnalytics(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const [bookings, centres, farmersCount, payments] = await Promise.all([
-      prisma.booking.findMany(),
-      prisma.procurementCentre.findMany(),
+    const [bookingsCount, completedProcuredSum, centres, farmersCount, paymentGroups, bookingCountsByCentre] = await Promise.all([
+      prisma.booking.count(),
+      prisma.booking.aggregate({
+        where: { currentStage: 'COMPLETED' },
+        _sum: { acceptedQuantityKg: true, quantityKg: true },
+      }),
+      prisma.procurementCentre.findMany({
+        take: 10,
+        orderBy: { name: 'asc' },
+      }),
       prisma.farmer.count(),
-      prisma.payment.findMany(),
+      prisma.payment.groupBy({
+        by: ['status'],
+        _sum: { amount: true },
+      }),
+      prisma.booking.groupBy({
+        by: ['centreId'],
+        _count: { id: true },
+      }),
     ]);
 
-    const completed = bookings.filter((b) => b.currentStage === 'COMPLETED');
-    const totalProcuredKg = completed.reduce(
-      (sum, b) => sum + (b.acceptedQuantityKg || b.quantityKg || 0),
-      0
-    );
+    const totalProcuredKg =
+      completedProcuredSum._sum.acceptedQuantityKg ?? completedProcuredSum._sum.quantityKg ?? 0;
     const totalProcuredTonnes = Math.round(totalProcuredKg / 10) / 100;
 
-    const totalDisbursedAmount = payments
-      .filter((p) => p.status === 'PAID')
-      .reduce((sum, p) => sum + p.amount, 0);
+    let totalDisbursedAmount = 0;
+    let pendingDisbursementAmount = 0;
+    for (const pg of paymentGroups) {
+      if (pg.status === 'PAID') {
+        totalDisbursedAmount += pg._sum.amount ?? 0;
+      } else if (pg.status === 'PENDING' || pg.status === 'INITIATED') {
+        pendingDisbursementAmount += pg._sum.amount ?? 0;
+      }
+    }
 
-    const pendingDisbursementAmount = payments
-      .filter((p) => p.status === 'PENDING' || p.status === 'INITIATED')
-      .reduce((sum, p) => sum + p.amount, 0);
+    const centreBookingCountMap = new Map(bookingCountsByCentre.map((b) => [b.centreId, b._count.id]));
 
-    const centreCongestionList = centres.slice(0, 10).map((centre) => {
-      const cBookings = bookings.filter((b) => b.centreId === centre.id);
-      const util = Math.min(100, Math.round((cBookings.length / 20) * 100));
+    const centreCongestionList = centres.map((centre) => {
+      const bCount = centreBookingCountMap.get(centre.id) || 0;
+      const util = Math.min(100, Math.round((bCount / 20) * 100));
       const status =
         util >= 85 ? 'FULL' : util >= 50 ? 'FILLING_FAST' : 'AVAILABLE';
       return {
@@ -505,6 +587,10 @@ export async function getAdminAnalytics(_req: Request, res: Response, next: Next
       };
     });
 
+    const activeCentresCount = await prisma.procurementCentre.count({
+      where: { operationalStatus: { not: 'CLOSED' } },
+    });
+
     res.json({
       success: true,
       data: {
@@ -512,9 +598,9 @@ export async function getAdminAnalytics(_req: Request, res: Response, next: Next
         totalDisbursedAmount,
         pendingDisbursementAmount,
         averageWaitTimeMin: 0,
-        activeCentresCount: centres.filter((c) => c.operationalStatus !== 'CLOSED').length,
+        activeCentresCount,
         totalRegisteredFarmers: farmersCount,
-        totalBookingsToday: bookings.length,
+        totalBookingsToday: bookingsCount,
         centreCongestionList,
       },
     });

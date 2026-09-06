@@ -238,7 +238,7 @@ class AgroIndiaMap {
       if (window.AGRO_MAP_EMBEDDED && window.AGRO_MAP_EMBEDDED.indiaStates) {
         this.indiaGeojson = window.AGRO_MAP_EMBEDDED.indiaStates;
       } else {
-        const res = await fetch("/data/india-states.json");
+        const res = await fetch("/data/india-states.optimized.json");
         this.indiaGeojson = await res.json();
       }
 
@@ -305,8 +305,11 @@ class AgroIndiaMap {
       .on("mousemove", function(event) {
         if (self.isZoomed) return;
         const [x, y] = d3.pointer(event, self.stage);
-        self.tooltip.style.left = `${x + 15}px`;
-        self.tooltip.style.top = `${y - 20}px`;
+        if (self.tooltipRaf) cancelAnimationFrame(self.tooltipRaf);
+        self.tooltipRaf = requestAnimationFrame(() => {
+          self.tooltip.style.left = `${x + 15}px`;
+          self.tooltip.style.top = `${y - 20}px`;
+        });
       })
       .on("mouseout", function() {
         if (self.isZoomed) return;
@@ -405,6 +408,9 @@ class AgroIndiaMap {
     const target = norm(stateName);
 
     const topoData = await this.getStateTopoData(stateName);
+    // Guard against race conditions during rapid state switching
+    if (this.currentState !== stateName) return;
+
     if (!topoData) {
       console.warn(`District boundary data not available for ${stateName}`);
       // Ensure the selected state path remains clearly visible and styled
@@ -588,24 +594,27 @@ class AgroIndiaMap {
 
   positionCard(event) {
     const [x, y] = d3.pointer(event, this.stage);
-    const cardWidth = 320;
-    const cardHeight = 260;
-    const stageWidth = this.stage.clientWidth;
-    const stageHeight = this.stage.clientHeight;
+    if (this.cardRaf) cancelAnimationFrame(this.cardRaf);
+    this.cardRaf = requestAnimationFrame(() => {
+      const cardWidth = 320;
+      const cardHeight = 260;
+      const stageWidth = this.stageWidth || (this.stageWidth = this.stage.clientWidth);
+      const stageHeight = this.stageHeight || (this.stageHeight = this.stage.clientHeight);
 
-    let posX = x + 20;
-    let posY = y - 30;
+      let posX = x + 20;
+      let posY = y - 30;
 
-    if (posX + cardWidth > stageWidth - 20) {
-      posX = x - cardWidth - 20;
-    }
-    if (posY + cardHeight > stageHeight - 20) {
-      posY = stageHeight - cardHeight - 20;
-    }
-    if (posY < 20) posY = 20;
+      if (posX + cardWidth > stageWidth - 20) {
+        posX = x - cardWidth - 20;
+      }
+      if (posY + cardHeight > stageHeight - 20) {
+        posY = stageHeight - cardHeight - 20;
+      }
+      if (posY < 20) posY = 20;
 
-    this.card.style.left = `${posX}px`;
-    this.card.style.top = `${posY}px`;
+      this.card.style.left = `${posX}px`;
+      this.card.style.top = `${posY}px`;
+    });
   }
 
   /**
@@ -675,11 +684,18 @@ class AgroIndiaMap {
    */
   async getStateTopoData(stateName) {
     const slug = (stateName || "").toLowerCase().replace(/[^a-z]/g, "");
+    const SLUG_ALIASES = {
+      dadraandnagarhavelianddamananddiu: "dadranagarhaveli"
+    };
+    const fileSlug = SLUG_ALIASES[slug] || slug;
 
     // 0. Check in-memory session cache for instant (0ms) return trips
     if (!this.topoCache) this.topoCache = new Map();
     if (this.topoCache.has(slug)) {
       return this.topoCache.get(slug);
+    }
+    if (this.topoCache.has(fileSlug)) {
+      return this.topoCache.get(fileSlug);
     }
 
     // 1. Check embedded cache
@@ -687,27 +703,30 @@ class AgroIndiaMap {
       if (window.AGRO_MAP_EMBEDDED.stateTopo[stateName]) {
         const data = window.AGRO_MAP_EMBEDDED.stateTopo[stateName];
         this.topoCache.set(slug, data);
+        this.topoCache.set(fileSlug, data);
         return data;
       }
       const foundKey = Object.keys(window.AGRO_MAP_EMBEDDED.stateTopo).find(
-        k => k.toLowerCase().replace(/[^a-z]/g, "") === slug
+        k => k.toLowerCase().replace(/[^a-z]/g, "") === slug || k.toLowerCase().replace(/[^a-z]/g, "") === fileSlug
       );
       if (foundKey) {
         const data = window.AGRO_MAP_EMBEDDED.stateTopo[foundKey];
         this.topoCache.set(slug, data);
+        this.topoCache.set(fileSlug, data);
         return data;
       }
     }
 
     // 2. Check local static file in /data/
     try {
-      const localRes = await fetch(`/data/${slug}.json`);
+      const localRes = await fetch(`/data/${fileSlug}.json`);
       if (localRes.ok) {
         const ct = localRes.headers.get("content-type");
         if (!ct || ct.includes("json")) {
           const data = await localRes.json();
           if (data && data.objects) {
             this.topoCache.set(slug, data);
+            this.topoCache.set(fileSlug, data);
             return data;
           }
         }
@@ -717,13 +736,14 @@ class AgroIndiaMap {
     // 3. Fallback to external CDN
     this.showLoader(`Loading ${stateName} districts...`);
     try {
-      const cdnRes = await fetch(`${this.options.cdnBaseUrl}${slug}.json`);
+      const cdnRes = await fetch(`${this.options.cdnBaseUrl}${fileSlug}.json`);
       if (cdnRes.ok) {
         const ct = cdnRes.headers.get("content-type");
         if (!ct || ct.includes("json")) {
           const data = await cdnRes.json();
           if (data && data.objects) {
             this.topoCache.set(slug, data);
+            this.topoCache.set(fileSlug, data);
             return data;
           }
         }
@@ -828,6 +848,8 @@ class AgroIndiaMap {
   }
 
   destroy() {
+    if (this.tooltipRaf) cancelAnimationFrame(this.tooltipRaf);
+    if (this.cardRaf) cancelAnimationFrame(this.cardRaf);
     if (this.container) {
       this.container.innerHTML = "";
       this.container.classList.remove("agro-map-wrapper");

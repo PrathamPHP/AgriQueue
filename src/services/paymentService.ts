@@ -44,6 +44,24 @@ class PaymentService {
     return all.filter((p) => p.farmerId === farmerId);
   }
 
+  public async getCentrePayments(centreId: string): Promise<Payment[]> {
+    try {
+      const list = await apiClient.get<Payment[]>('/payments', { centreId });
+      if (Array.isArray(list)) {
+        dataStore.upsertPayments(list, false);
+        return list;
+      }
+    } catch {}
+    const all = Object.values(dataStore.getPayments());
+    const centreBookingIds = new Set(
+      dataStore
+        .getBookings()
+        .filter((b) => b.centreId === centreId)
+        .map((b) => b.id)
+    );
+    return all.filter((p) => centreBookingIds.has(p.bookingId));
+  }
+
   public async getAllPayments(): Promise<Payment[]> {
     try {
       const list = await apiClient.get<Payment[]>('/payments');

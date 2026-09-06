@@ -235,29 +235,70 @@ export async function getBookingById(req: Request, res: Response, next: NextFunc
 
 export async function getBookings(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { centreId, date, status, farmerId, limit } = req.query;
+    const { centreId, date, status, farmerId, currentStage, search, page, pageSize, limit } = req.query;
+
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const sizeNum = Math.min(100, Math.max(1, parseInt(String(pageSize || limit), 10) || 20));
+
     const whereClause: any = {};
     if (centreId) whereClause.centreId = String(centreId);
     if (date) whereClause.bookingDate = String(date);
-    if (status) whereClause.status = String(status);
     if (farmerId) whereClause.farmerId = String(farmerId);
 
-    const takeLimit = limit ? Math.min(Number(limit), 100) : 50;
+    if (status && status !== 'ALL') {
+      whereClause.status = String(status);
+    }
 
-    const bookings = await prisma.booking.findMany({
-      where: whereClause,
-      orderBy: { tokenNumber: 'asc' },
-      take: takeLimit,
-      include: {
-        queueEntry: true,
-        procurement: true,
-      },
-    });
+    if (currentStage && currentStage !== 'ALL') {
+      const stageStr = String(currentStage);
+      if (stageStr === 'WAITING') {
+        whereClause.currentStage = { in: ['BOOKED', 'ARRIVED', 'CHECKED_IN', 'WAITING', 'NOW_SERVING'] };
+      } else if (stageStr === 'IN_PROGRESS') {
+        whereClause.currentStage = { in: ['VERIFICATION', 'QUALITY_CHECK', 'WEIGHING'] };
+      } else {
+        whereClause.currentStage = stageStr;
+      }
+    }
+
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      const tokenNum = parseInt(q.replace('#', ''), 10);
+      whereClause.OR = [
+        { farmerName: { contains: q, mode: 'insensitive' } },
+        { farmerMobile: { contains: q } },
+        { cropName: { contains: q, mode: 'insensitive' } },
+        ...(isNaN(tokenNum) ? [] : [{ tokenNumber: tokenNum }]),
+      ];
+    }
+
+    const [totalItems, bookings] = await Promise.all([
+      prisma.booking.count({ where: whereClause }),
+      prisma.booking.findMany({
+        where: whereClause,
+        orderBy: { tokenNumber: 'asc' },
+        skip: (pageNum - 1) * sizeNum,
+        take: sizeNum,
+        include: {
+          queueEntry: true,
+          procurement: true,
+        },
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(totalItems / sizeNum));
 
     res.json({
       success: true,
       count: bookings.length,
       data: bookings.map((b) => ({ ...b, date: b.bookingDate })),
+      pagination: {
+        page: pageNum,
+        pageSize: sizeNum,
+        totalItems,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+      },
     });
   } catch (error) {
     next(error);
@@ -267,12 +308,72 @@ export async function getBookings(req: Request, res: Response, next: NextFunctio
 export async function getCentreBookings(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { centreId } = req.params;
-    const { date, status } = req.query;
+    const { date, status, currentStage, search, page, pageSize } = req.query;
 
     const whereClause: any = { centreId };
     if (date) whereClause.bookingDate = String(date);
-    if (status) whereClause.status = String(status);
+    if (status && status !== 'ALL') whereClause.status = String(status);
 
+    if (currentStage && currentStage !== 'ALL') {
+      const stageStr = String(currentStage);
+      if (stageStr === 'WAITING') {
+        whereClause.currentStage = { in: ['BOOKED', 'ARRIVED', 'CHECKED_IN', 'WAITING', 'NOW_SERVING'] };
+      } else if (stageStr === 'IN_PROGRESS') {
+        whereClause.currentStage = { in: ['VERIFICATION', 'QUALITY_CHECK', 'WEIGHING'] };
+      } else {
+        whereClause.currentStage = stageStr;
+      }
+    }
+
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      const tokenNum = parseInt(q.replace('#', ''), 10);
+      whereClause.OR = [
+        { farmerName: { contains: q, mode: 'insensitive' } },
+        { farmerMobile: { contains: q } },
+        { cropName: { contains: q, mode: 'insensitive' } },
+        ...(isNaN(tokenNum) ? [] : [{ tokenNumber: tokenNum }]),
+      ];
+    }
+
+    // Check if client explicitly requested pagination
+    if (page !== undefined || pageSize !== undefined) {
+      const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+      const sizeNum = Math.min(100, Math.max(1, parseInt(String(pageSize), 10) || 20));
+
+      const [totalItems, bookings] = await Promise.all([
+        prisma.booking.count({ where: whereClause }),
+        prisma.booking.findMany({
+          where: whereClause,
+          orderBy: { tokenNumber: 'asc' },
+          skip: (pageNum - 1) * sizeNum,
+          take: sizeNum,
+          include: {
+            queueEntry: true,
+            procurement: true,
+          },
+        }),
+      ]);
+
+      const totalPages = Math.max(1, Math.ceil(totalItems / sizeNum));
+
+      res.json({
+        success: true,
+        count: bookings.length,
+        data: bookings.map((b) => ({ ...b, date: b.bookingDate })),
+        pagination: {
+          page: pageNum,
+          pageSize: sizeNum,
+          totalItems,
+          totalPages,
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
+        },
+      });
+      return;
+    }
+
+    // Default backward compatible (unpaginated for internal queue operations)
     const bookings = await prisma.booking.findMany({
       where: whereClause,
       orderBy: { tokenNumber: 'asc' },
@@ -286,6 +387,14 @@ export async function getCentreBookings(req: Request, res: Response, next: NextF
       success: true,
       count: bookings.length,
       data: bookings.map((b) => ({ ...b, date: b.bookingDate })),
+      pagination: {
+        page: 1,
+        pageSize: bookings.length,
+        totalItems: bookings.length,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
     });
   } catch (error) {
     next(error);

@@ -127,6 +127,13 @@ class FarmerService {
     return bookingService.getFarmerBookings(farmerId);
   }
 
+  public async getPaginatedFarmerBookings(
+    farmerId: string,
+    options: { page: number; pageSize: number; status?: string }
+  ) {
+    return bookingService.getPaginatedFarmerBookings(farmerId, options);
+  }
+
   public async getFarmerNotifications(farmerId: string): Promise<Notification[]> {
     try {
       const notifs = await apiClient.get<Notification[]>(`/farmers/${farmerId}/notifications`);

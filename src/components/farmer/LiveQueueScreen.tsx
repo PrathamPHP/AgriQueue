@@ -404,3 +404,5 @@ export const LiveQueueScreen: React.FC<LiveQueueScreenProps> = ({
     </div>
   );
 };
+
+export default LiveQueueScreen;

@@ -683,3 +683,5 @@ export const NationalAdminDashboard: React.FC = () => {
     </div>
   );
 };
+
+export default NationalAdminDashboard;

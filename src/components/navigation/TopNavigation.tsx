@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { UserRole, LanguageCode } from '@/types';
 import { dataStore } from '@/services/dataStore';
 import { useTranslation } from '@/i18n/LanguageContext';
+import { preloadModule } from '@/lib/lazyWithRetry';
 import {
   Wheat,
   Globe,
@@ -78,6 +79,26 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
       navigate('/admin/dashboard');
     }
   };
+
+  const preloadPersona = (role: UserRole) => {
+    if (role === 'farmer') {
+      preloadModule(() => import('@/components/farmer/FarmerDashboard'));
+    } else if (role === 'officer') {
+      preloadModule(() => import('@/components/officer/OfficerDashboard'));
+    } else if (role === 'admin') {
+      preloadModule(() => import('@/components/admin/AdminLayout'));
+      preloadModule(() => import('@/components/admin/AdminDashboard'));
+    }
+  };
+
+  useEffect(() => {
+    // Warm up other personas in background idle time
+    const timer = setTimeout(() => {
+      preloadPersona('officer');
+      preloadPersona('admin');
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleLogout = () => {
     setAccountMenuOpen(false);
@@ -241,6 +262,8 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
             </span>
             <button
               onClick={() => handleRoleSwitch('farmer')}
+              onMouseEnter={() => preloadPersona('farmer')}
+              onFocus={() => preloadPersona('farmer')}
               className={cn(
                 'flex items-center gap-1 px-2.5 py-1.5 rounded-button text-xs font-bold transition-all',
                 currentRole === 'farmer'
@@ -255,6 +278,8 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
 
             <button
               onClick={() => handleRoleSwitch('officer')}
+              onMouseEnter={() => preloadPersona('officer')}
+              onFocus={() => preloadPersona('officer')}
               className={cn(
                 'flex items-center gap-1 px-2.5 py-1.5 rounded-button text-xs font-bold transition-all',
                 currentRole === 'officer'
@@ -269,6 +294,8 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
 
             <button
               onClick={() => handleRoleSwitch('admin')}
+              onMouseEnter={() => preloadPersona('admin')}
+              onFocus={() => preloadPersona('admin')}
               className={cn(
                 'flex items-center gap-1 px-2.5 py-1.5 rounded-button text-xs font-bold transition-all',
                 currentRole === 'admin'

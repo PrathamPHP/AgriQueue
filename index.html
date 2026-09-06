@@ -15,14 +15,9 @@
   <body class="bg-[#F8FAFC] text-[#111827] font-sans antialiased min-h-screen selection:bg-[#DCFCE7] selection:text-[#166534]">
     <div id="root"></div>
 
-    <!-- D3.js & TopoJSON CDN -->
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
-
-    <!-- AgroIndiaMap Component Scripts -->
-    <script src="/js/embedded-map-data.js"></script>
-    <script src="/js/procurement-data.js"></script>
-    <script src="/js/agro-india-map.js"></script>
+    <!-- AgroIndiaMap Component Scripts (deferred to avoid blocking React bootstrap) -->
+    <script defer src="/js/procurement-data.js"></script>
+    <script defer src="/js/agro-india-map.js"></script>
 
     <script type="module" src="/src/main.tsx"></script>
   </body>

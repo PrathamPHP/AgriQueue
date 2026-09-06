@@ -456,3 +456,5 @@ export const DistrictDashboard: React.FC = () => {
     </div>
   );
 };
+
+export default DistrictDashboard;

@@ -126,10 +126,11 @@ export async function getPaymentById(req: Request, res: Response, next: NextFunc
 
 export async function getPayments(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { farmerId, status } = req.query;
+    const { farmerId, status, centreId } = req.query;
     const whereClause: any = {};
     if (farmerId) whereClause.farmerId = String(farmerId);
     if (status) whereClause.status = String(status);
+    if (centreId) whereClause.booking = { centreId: String(centreId) };
 
     const payments = await prisma.payment.findMany({
       where: whereClause,

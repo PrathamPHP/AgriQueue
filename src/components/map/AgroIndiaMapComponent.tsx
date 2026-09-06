@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 
 declare global {
   interface Window {
+    d3?: any;
+    topojson?: any;
     AgroIndiaMap?: any;
     AGRO_MAP_EMBEDDED?: any;
     AGRO_PROCUREMENT_DATA?: any;
@@ -55,14 +57,38 @@ export const AgroIndiaMapComponent: React.FC<AgroIndiaMapComponentProps> = ({
   const onBackToIndiaRef = useRef(onBackToIndia);
   onBackToIndiaRef.current = onBackToIndia;
 
+  // Dynamically load D3 and TopoJSON on demand when map component mounts
+  useEffect(() => {
+    let isMounted = true;
+    const loadLibraries = async () => {
+      if (typeof window !== 'undefined' && (!window.d3 || !window.topojson)) {
+        try {
+          const [d3Module, topojsonModule] = await Promise.all([
+            import('d3'),
+            import('topojson-client'),
+          ]);
+          if (!isMounted) return;
+          if (!window.d3) window.d3 = d3Module;
+          if (!window.topojson) window.topojson = topojsonModule;
+        } catch (err) {
+          console.error('Failed to dynamically load D3/TopoJSON:', err);
+        }
+      }
+    };
+    loadLibraries();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Poll until window.AgroIndiaMap is available
   useEffect(() => {
     let timer: any = null;
     const checkReady = () => {
-      if (typeof window !== 'undefined' && window.AgroIndiaMap) {
+      if (typeof window !== 'undefined' && window.AgroIndiaMap && window.d3 && window.topojson) {
         setIsReady(true);
       } else {
-        timer = setTimeout(checkReady, 100);
+        timer = setTimeout(checkReady, 50);
       }
     };
     checkReady();

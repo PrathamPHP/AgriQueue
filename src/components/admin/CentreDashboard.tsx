@@ -458,3 +458,5 @@ export const CentreDashboard: React.FC = () => {
     </div>
   );
 };
+
+export default CentreDashboard;

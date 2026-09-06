@@ -184,15 +184,77 @@ export async function loginFarmer(req: Request, res: Response, next: NextFunctio
 export async function getFarmerBookings(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { id } = req.params;
+    const { page, pageSize, status } = req.query;
+
+    const whereClause: any = { farmerId: id };
+    if (status === 'ACTIVE') {
+      whereClause.status = 'confirmed';
+      whereClause.currentStage = { not: 'COMPLETED' };
+    } else if (status === 'COMPLETED') {
+      whereClause.currentStage = 'COMPLETED';
+    } else if (status && status !== 'ALL') {
+      whereClause.status = String(status);
+    }
+
+    if (page !== undefined || pageSize !== undefined) {
+      const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+      const sizeNum = Math.min(100, Math.max(1, parseInt(String(pageSize), 10) || 10));
+
+      const [totalItems, bookings] = await Promise.all([
+        prisma.booking.count({ where: whereClause }),
+        prisma.booking.findMany({
+          where: whereClause,
+          orderBy: { tokenNumber: 'desc' },
+          skip: (pageNum - 1) * sizeNum,
+          take: sizeNum,
+          include: {
+            queueEntry: true,
+            procurement: true,
+          },
+        }),
+      ]);
+
+      const totalPages = Math.max(1, Math.ceil(totalItems / sizeNum));
+
+      res.json({
+        success: true,
+        count: bookings.length,
+        data: bookings.map((b) => ({ ...b, date: b.bookingDate })),
+        pagination: {
+          page: pageNum,
+          pageSize: sizeNum,
+          totalItems,
+          totalPages,
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
+        },
+      });
+      return;
+    }
+
+    // Default backward compatible (unpaginated list)
     const bookings = await prisma.booking.findMany({
-      where: { farmerId: id },
+      where: whereClause,
       orderBy: { tokenNumber: 'desc' },
       include: {
         queueEntry: true,
         procurement: true,
       },
     });
-    res.json({ success: true, count: bookings.length, data: bookings });
+
+    res.json({
+      success: true,
+      count: bookings.length,
+      data: bookings.map((b) => ({ ...b, date: b.bookingDate })),
+      pagination: {
+        page: 1,
+        pageSize: bookings.length,
+        totalItems: bookings.length,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
+    });
   } catch (error) {
     next(error);
   }

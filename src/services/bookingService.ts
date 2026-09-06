@@ -7,7 +7,7 @@
 import { Booking, QueueEntry } from '@/types';
 import { dataStore } from './dataStore';
 import { storageService } from './storageService';
-import { apiClient } from './apiClient';
+import { apiClient, PaginatedResponse } from './apiClient';
 
 export interface DraftBooking {
   cropId?: string;
@@ -118,7 +118,7 @@ class BookingService {
         dataStore.upsertBookings(normalized, false);
         for (const b of bookings) {
           if ((b as any).queueEntry) {
-            dataStore.setQueueEntry(b.id, (b as any).queueEntry);
+            dataStore.setQueueEntry(b.id, (b as any).queueEntry, false);
           }
         }
         return normalized;
@@ -133,6 +133,66 @@ class BookingService {
       .sort((a, b) => b.tokenNumber - a.tokenNumber);
   }
 
+  public async getPaginatedFarmerBookings(
+    farmerId: string,
+    options: { page: number; pageSize: number; status?: string }
+  ): Promise<PaginatedResponse<Booking>> {
+    const { page, pageSize, status } = options;
+    try {
+      const res = await apiClient.getPaginated<Booking>(`/farmers/${farmerId}/bookings`, {
+        page,
+        pageSize,
+        status: status || 'ALL',
+      });
+      const normalized = res.data.map((b) => ({
+        ...b,
+        date: b.date || (b as any).bookingDate,
+      }));
+      dataStore.upsertBookings(normalized, false);
+      for (const b of res.data) {
+        if ((b as any).queueEntry) {
+          dataStore.setQueueEntry(b.id, (b as any).queueEntry, false);
+        }
+      }
+      return {
+        ...res,
+        data: normalized,
+      };
+    } catch (e) {
+      console.warn('[BookingService] Failed to fetch paginated farmer bookings from API:', e);
+    }
+
+    // Fallback to in-memory store
+    const all = dataStore
+      .getBookings()
+      .filter((b) => b.farmerId === farmerId)
+      .filter((b) => {
+        if (status === 'ACTIVE') return b.status === 'confirmed' && b.currentStage !== 'COMPLETED';
+        if (status === 'COMPLETED') return b.currentStage === 'COMPLETED';
+        return true;
+      })
+      .sort((a, b) => b.tokenNumber - a.tokenNumber);
+
+    const totalItems = all.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const safePage = Math.min(totalPages, Math.max(1, page));
+    const pagedData = all.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+    return {
+      success: true,
+      count: pagedData.length,
+      data: pagedData,
+      pagination: {
+        page: safePage,
+        pageSize,
+        totalItems,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPrevPage: safePage > 1,
+      },
+    };
+  }
+
   public async getCentreBookings(centreId: string): Promise<Booking[]> {
     try {
       const bookings = await apiClient.get<Booking[]>(`/centres/${centreId}/bookings`);
@@ -144,7 +204,7 @@ class BookingService {
         dataStore.upsertBookings(normalized, false);
         for (const b of bookings) {
           if ((b as any).queueEntry) {
-            dataStore.setQueueEntry(b.id, (b as any).queueEntry);
+            dataStore.setQueueEntry(b.id, (b as any).queueEntry, false);
           }
         }
         return normalized;
@@ -157,6 +217,84 @@ class BookingService {
       .getBookings()
       .filter((b) => b.centreId === centreId)
       .sort((a, b) => a.tokenNumber - b.tokenNumber);
+  }
+
+  public async getPaginatedCentreBookings(
+    centreId: string,
+    options: { page: number; pageSize: number; search?: string; status?: string }
+  ): Promise<PaginatedResponse<Booking>> {
+    const { page, pageSize, search, status } = options;
+    try {
+      const res = await apiClient.getPaginated<Booking>(`/centres/${centreId}/bookings`, {
+        page,
+        pageSize,
+        search: search || '',
+        currentStage: status || 'ALL',
+      });
+      const normalized = res.data.map((b) => ({
+        ...b,
+        date: b.date || (b as any).bookingDate,
+      }));
+      dataStore.upsertBookings(normalized, false);
+      for (const b of res.data) {
+        if ((b as any).queueEntry) {
+          dataStore.setQueueEntry(b.id, (b as any).queueEntry, false);
+        }
+      }
+      return {
+        ...res,
+        data: normalized,
+      };
+    } catch (e) {
+      console.warn('[BookingService] Failed to fetch paginated centre bookings from API:', e);
+    }
+
+    // Fallback to in-memory store
+    const all = dataStore
+      .getBookings()
+      .filter((b) => b.centreId === centreId)
+      .filter((b) => {
+        const q = (search || '').toLowerCase().trim();
+        const matchesSearch =
+          q === '' ||
+          b.farmerName.toLowerCase().includes(q) ||
+          b.tokenNumber.toString().includes(q.replace('#', '')) ||
+          b.farmerMobile.includes(q) ||
+          b.cropName.toLowerCase().includes(q);
+
+        if (!matchesSearch) return false;
+
+        if (!status || status === 'ALL') return true;
+        if (status === 'WAITING') {
+          return ['BOOKED', 'ARRIVED', 'CHECKED_IN', 'WAITING', 'NOW_SERVING'].includes(b.currentStage);
+        }
+        if (status === 'IN_PROGRESS') {
+          return ['VERIFICATION', 'QUALITY_CHECK', 'WEIGHING'].includes(b.currentStage);
+        }
+        if (status === 'COMPLETED') return b.currentStage === 'COMPLETED';
+        if (status === 'NO_SHOW') return b.currentStage === 'NO_SHOW';
+        return true;
+      })
+      .sort((a, b) => a.tokenNumber - b.tokenNumber);
+
+    const totalItems = all.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const safePage = Math.min(totalPages, Math.max(1, page));
+    const pagedData = all.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+    return {
+      success: true,
+      count: pagedData.length,
+      data: pagedData,
+      pagination: {
+        page: safePage,
+        pageSize,
+        totalItems,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPrevPage: safePage > 1,
+      },
+    };
   }
 
   public async getBookingById(id: string): Promise<Booking | null> {

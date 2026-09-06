@@ -729,3 +729,5 @@ export const StateDashboard: React.FC = () => {
     </div>
   );
 };
+
+export default StateDashboard;

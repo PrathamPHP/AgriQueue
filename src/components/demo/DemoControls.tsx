@@ -349,3 +349,5 @@ export const DemoControls: React.FC = () => {
     </div>
   );
 };
+
+export default DemoControls;

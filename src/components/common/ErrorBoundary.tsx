@@ -4,6 +4,8 @@ import { Button } from './Button';
 
 interface Props {
   children: ReactNode;
+  resetKeys?: any[];
+  onReset?: () => void;
 }
 
 interface State {
@@ -23,6 +25,18 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error caught by ErrorBoundary:', error, errorInfo);
+  }
+
+  public componentDidUpdate(prevProps: Props) {
+    if (this.state.hasError && this.props.resetKeys) {
+      const hasChanged = this.props.resetKeys.some(
+        (key, idx) => key !== prevProps.resetKeys?.[idx]
+      );
+      if (hasChanged) {
+        this.setState({ hasError: false, error: null });
+        if (this.props.onReset) this.props.onReset();
+      }
+    }
   }
 
   private handleReset = () => {

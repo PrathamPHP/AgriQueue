@@ -30,17 +30,40 @@ export const FarmerBookingsList: React.FC<FarmerBookingsListProps> = ({ currentL
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [filter, setFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED'>('ALL');
+  const [page, setPage] = useState<number>(1);
+  const PAGE_SIZE = 5;
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPrevPage: false,
+  });
 
-  const loadBookings = async () => {
+  const loadBookings = async (targetPage: number = page, targetFilter: 'ALL' | 'ACTIVE' | 'COMPLETED' = filter) => {
     setIsLoading(true);
     try {
       const farmer = dataStore.getCurrentFarmer();
       if (!farmer) {
         setBookings([]);
+        setPagination({
+          page: 1,
+          pageSize: PAGE_SIZE,
+          totalItems: 0,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPrevPage: false,
+        });
         return;
       }
-      const list = await bookingService.getFarmerBookings(farmer.id);
-      setBookings(list);
+      const res = await bookingService.getPaginatedFarmerBookings(farmer.id, {
+        page: targetPage,
+        pageSize: PAGE_SIZE,
+        status: targetFilter,
+      });
+      setBookings(res.data);
+      setPagination(res.pagination);
     } catch (err) {
       console.error('Failed to load bookings:', err);
     } finally {
@@ -49,18 +72,20 @@ export const FarmerBookingsList: React.FC<FarmerBookingsListProps> = ({ currentL
   };
 
   useEffect(() => {
-    loadBookings();
+    loadBookings(page, filter);
+  }, [page, filter]);
+
+  useEffect(() => {
     const unsubscribe = dataStore.subscribe(() => {
-      loadBookings();
+      loadBookings(page, filter);
     });
     return () => unsubscribe();
-  }, []);
+  }, [page, filter]);
 
-  const filteredBookings = bookings.filter((b) => {
-    if (filter === 'ACTIVE') return b.status === 'confirmed' && b.currentStage !== 'COMPLETED';
-    if (filter === 'COMPLETED') return b.currentStage === 'COMPLETED';
-    return true;
-  });
+  const handleFilterChange = (newFilter: 'ALL' | 'ACTIVE' | 'COMPLETED') => {
+    setFilter(newFilter);
+    setPage(1);
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-5 animate-fade-in pb-12">
@@ -97,34 +122,34 @@ export const FarmerBookingsList: React.FC<FarmerBookingsListProps> = ({ currentL
       {/* Filter Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
         <button
-          onClick={() => setFilter('ALL')}
+          onClick={() => handleFilterChange('ALL')}
           className={`text-xs sm:text-sm font-bold px-3 py-1.5 rounded-button transition-colors ${
             filter === 'ALL'
               ? 'bg-[#166534] text-white'
               : 'text-slate-600 hover:bg-slate-100'
           }`}
         >
-          All ({bookings.length})
+          All {filter === 'ALL' && pagination.totalItems > 0 ? `(${pagination.totalItems})` : ''}
         </button>
         <button
-          onClick={() => setFilter('ACTIVE')}
+          onClick={() => handleFilterChange('ACTIVE')}
           className={`text-xs sm:text-sm font-bold px-3 py-1.5 rounded-button transition-colors ${
             filter === 'ACTIVE'
               ? 'bg-[#166534] text-white'
               : 'text-slate-600 hover:bg-slate-100'
           }`}
         >
-          Active / Scheduled ({bookings.filter((b) => b.currentStage !== 'COMPLETED').length})
+          Active / Scheduled {filter === 'ACTIVE' && pagination.totalItems > 0 ? `(${pagination.totalItems})` : ''}
         </button>
         <button
-          onClick={() => setFilter('COMPLETED')}
+          onClick={() => handleFilterChange('COMPLETED')}
           className={`text-xs sm:text-sm font-bold px-3 py-1.5 rounded-button transition-colors ${
             filter === 'COMPLETED'
               ? 'bg-[#166534] text-white'
               : 'text-slate-600 hover:bg-slate-100'
           }`}
         >
-          Completed ({bookings.filter((b) => b.currentStage === 'COMPLETED').length})
+          Completed {filter === 'COMPLETED' && pagination.totalItems > 0 ? `(${pagination.totalItems})` : ''}
         </button>
       </div>
 
@@ -134,7 +159,7 @@ export const FarmerBookingsList: React.FC<FarmerBookingsListProps> = ({ currentL
           <RefreshCw className="w-6 h-6 animate-spin text-[#166534] mb-2" />
           <p className="text-xs text-slate-500 font-medium">Loading your bookings...</p>
         </div>
-      ) : filteredBookings.length === 0 ? (
+      ) : bookings.length === 0 ? (
         /* Empty state */
         <Card className="p-8 text-center bg-white border border-dashed border-slate-300">
           <div className="w-12 h-12 rounded-full bg-emerald-50 text-[#166534] flex items-center justify-center mx-auto mb-3">
@@ -158,8 +183,9 @@ export const FarmerBookingsList: React.FC<FarmerBookingsListProps> = ({ currentL
         </Card>
       ) : (
         /* Bookings List */
+        /* Bookings List */
         <div className="space-y-3">
-          {filteredBookings.map((booking) => {
+          {bookings.map((booking) => {
             const isCompleted = booking.currentStage === 'COMPLETED';
 
             return (
@@ -242,8 +268,48 @@ export const FarmerBookingsList: React.FC<FarmerBookingsListProps> = ({ currentL
               </Card>
             );
           })}
+
+          {/* Pagination Controls */}
+          {pagination.totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200 text-xs text-slate-600">
+              <div>
+                Showing{' '}
+                <span className="font-bold text-slate-900">
+                  {pagination.totalItems === 0 ? 0 : (pagination.page - 1) * pagination.pageSize + 1}
+                </span>{' '}
+                to{' '}
+                <span className="font-bold text-slate-900">
+                  {Math.min(pagination.page * pagination.pageSize, pagination.totalItems)}
+                </span>{' '}
+                of <span className="font-bold text-slate-900">{pagination.totalItems}</span> bookings
+              </div>
+              <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!pagination.hasPrevPage}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="px-2 font-semibold text-slate-700">
+                  Page {pagination.page} of {pagination.totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!pagination.hasNextPage}
+                  onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 };
+
+export default FarmerBookingsList;

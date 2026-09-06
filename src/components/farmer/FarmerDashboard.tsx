@@ -668,3 +668,5 @@ export const FarmerDashboard: React.FC<FarmerDashboardProps> = () => {
     </div>
   );
 };
+
+export default FarmerDashboard;

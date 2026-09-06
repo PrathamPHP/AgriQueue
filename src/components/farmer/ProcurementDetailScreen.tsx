@@ -417,3 +417,5 @@ export const ProcurementDetailScreen: React.FC<ProcurementDetailScreenProps> = (
     </div>
   );
 };
+
+export default ProcurementDetailScreen;

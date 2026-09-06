@@ -1148,3 +1148,5 @@ export const BookSlotWizard: React.FC<BookSlotWizardProps> = ({
     </div>
   );
 };
+
+export default BookSlotWizard;
