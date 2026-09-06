@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    color: #111827;
+    background-color: #F8FAFC;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Accessibility focus styles */
+  :focus-visible {
+    outline: 2px solid #166534;
+    outline-offset: 2px;
+  }
+}
+
+/* Custom accessible transitions and utility classes */
+@layer utilities {
+  .tap-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+  }
+
+  .transition-token {
+    transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+/* Accessibility: Respect system reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

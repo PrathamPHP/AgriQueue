@@ -1,0 +1,316 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model State {
+  id        String   @id
+  code      String
+  name      String
+  type      String   @default("STATE")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  districts District[]
+  centres   ProcurementCentre[]
+  farmers   Farmer[]
+  bookings  Booking[]
+
+  @@map("states")
+}
+
+model District {
+  id        String   @id
+  stateId   String   @map("state_id")
+  code      String
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  state     State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  centres   ProcurementCentre[]
+  farmers   Farmer[]
+  bookings  Booking[]
+
+  @@index([stateId])
+  @@map("districts")
+}
+
+model ProcurementCentre {
+  id                  String   @id
+  stateId             String   @map("state_id")
+  districtId          String   @map("district_id")
+  code                String
+  name                String
+  address             String?
+  district            String?
+  state               String?
+  latitude            Float?
+  longitude           Float?
+  dailyCapacityMT     Float    @default(100) @map("daily_capacity_mt")
+  capacityPerHourKg   Float    @default(2800) @map("capacity_per_hour_kg")
+  activeGates         Int      @default(2) @map("active_gates")
+  activeWeighbridges  Int      @default(2) @map("active_weighbridges")
+  operationalStatus   String   @default("OPEN") @map("operational_status")
+  currentDelayMinutes Int      @default(0) @map("current_delay_minutes")
+  avgWaitTimeMin      Int      @default(15) @map("avg_wait_time_min")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  stateRel     State     @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  districtRel  District  @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  officers     Officer[]
+  slots        Slot[]
+  bookings     Booking[]
+  queueEntries QueueEntry[]
+
+  @@index([districtId])
+  @@index([stateId])
+  @@map("procurement_centres")
+}
+
+model Crop {
+  id                     String   @id
+  name                   String
+  nameHindi              String?  @map("name_hindi")
+  baseProcessingTimeMin  Int      @default(8) @map("base_processing_time_min")
+  throughputRateKgPerMin Int      @default(50) @map("throughput_rate_kg_per_min")
+  mspPerQuintal          Float    @map("msp_per_quintal")
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  bookings     Booking[]
+  procurements ProcurementRecord[]
+
+  @@map("crops")
+}
+
+model User {
+  id         String   @id
+  name       String
+  email      String?  @unique
+  role       String
+  scopeType  String?  @map("scope_type")
+  scopeId    String?  @map("scope_id")
+  scopeName  String?  @map("scope_name")
+  stateId    String?  @map("state_id")
+  districtId String?  @map("district_id")
+  centreId   String?  @map("centre_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Officer {
+  id         String   @id
+  name       String
+  email      String
+  mobile     String
+  stateId    String?  @map("state_id")
+  districtId String?  @map("district_id")
+  centreId   String   @map("centre_id")
+  centreName String?  @map("centre_name")
+  deskNumber String   @default("Desk 1") @map("desk_number")
+  role       String   @default("Procurement Inspector")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  centre     ProcurementCentre @relation(fields: [centreId], references: [id], onDelete: Cascade)
+
+  @@map("officers")
+}
+
+model Farmer {
+  id                String   @id
+  name              String
+  mobileNumber      String   @map("mobile_number")
+  aadhaarNumber     String?  @map("aadhaar_number")
+  languagePref      String   @default("en") @map("language_pref")
+  address           String
+  village           String?
+  state             String?
+  district          String?
+  stateId           String   @map("state_id")
+  districtId        String   @map("district_id")
+  landAreaAcres     Float?   @map("land_area_acres")
+  bankAccountMasked String?  @map("bank_account_masked")
+  bankAccountNumber String?  @map("bank_account_number")
+  ifscCode          String?  @map("ifsc_code")
+  bankName          String?  @map("bank_name")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  stateRel      State     @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  districtRel   District  @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+  procurements  ProcurementRecord[]
+  payments      Payment[]
+  notifications Notification[]
+
+  @@map("farmers")
+}
+
+model Slot {
+  id         String   @id
+  centreId   String   @map("centre_id")
+  date       String
+  startTime  String   @map("start_time")
+  endTime    String   @map("end_time")
+  timeWindow String   @map("time_window")
+  capacity   Int      @default(15)
+  status     String   @default("AVAILABLE")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  centre   ProcurementCentre @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@unique([centreId, date, startTime])
+  @@index([centreId, date])
+  @@map("slots")
+}
+
+model Booking {
+  id                 String   @id
+  tokenNumber        Int      @map("token_number")
+  farmerId           String   @map("farmer_id")
+  farmerName         String   @map("farmer_name")
+  farmerMobile       String   @map("farmer_mobile")
+  stateId            String   @map("state_id")
+  districtId         String   @map("district_id")
+  centreId           String   @map("centre_id")
+  centreName         String   @map("centre_name")
+  cropId             String   @map("crop_id")
+  cropName           String   @map("crop_name")
+  cropNameHindi      String?  @map("crop_name_hindi")
+  quantityKg         Float    @map("quantity_kg")
+  slotId             String   @map("slot_id")
+  bookingDate        String   @map("booking_date")
+  timeWindow         String   @map("time_window")
+  status             String   @default("confirmed")
+  currentStage       String   @default("BOOKED") @map("current_stage")
+  stageTimestamps    Json?    @map("stage_timestamps")
+  qualityGrade       String?  @map("quality_grade")
+  acceptedQuantityKg Float?   @map("accepted_quantity_kg")
+  actualWeightKg     Float?   @map("actual_weight_kg")
+  rejectionReason    String?  @map("rejection_reason")
+  remarks            String?
+  priorityFlag       Boolean  @default(false) @map("priority_flag")
+  estimatedArrivalNotice String? @map("estimated_arrival_notice")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  farmer       Farmer            @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  stateRel     State             @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  districtRel  District          @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  centre       ProcurementCentre @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  crop         Crop              @relation(fields: [cropId], references: [id], onDelete: Cascade)
+  slot         Slot              @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  queueEntry   QueueEntry?
+  procurement  ProcurementRecord?
+  payment      Payment?
+
+  @@index([centreId, bookingDate])
+  @@map("bookings")
+}
+
+model QueueEntry {
+  id                      String   @id
+  bookingId               String   @unique @map("booking_id")
+  centreId                String   @map("centre_id")
+  tokenNumber             Int      @map("token_number")
+  currentToken            Int      @default(0) @map("current_token")
+  farmersAhead            Int      @default(0) @map("farmers_ahead")
+  estimatedWaitingMinutes Int      @default(0) @map("estimated_waiting_minutes")
+  currentDelayMinutes     Int      @default(0) @map("current_delay_minutes")
+  recommendedArrivalTime  String?  @map("recommended_arrival_time")
+  isQueueActive           Boolean  @default(true) @map("is_queue_active")
+  isTurnApproaching       Boolean  @default(false) @map("is_turn_approaching")
+  totalInitialDistance    Int?     @default(2) @map("total_initial_distance")
+  lastUpdated             String   @map("last_updated")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  booking Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  centre  ProcurementCentre @relation(fields: [centreId], references: [id], onDelete: Cascade)
+
+  @@index([centreId])
+  @@map("queue_entries")
+}
+
+model ProcurementRecord {
+  id                 String   @id
+  bookingId          String   @unique @map("booking_id")
+  farmerId           String   @map("farmer_id")
+  cropId             String   @map("crop_id")
+  cropName           String   @map("crop_name")
+  bookedQuantityKg   Float    @map("booked_quantity_kg")
+  acceptedQuantityKg Float    @map("accepted_quantity_kg")
+  actualWeightKg     Float?   @map("actual_weight_kg")
+  qualityGrade       String   @default("Grade A") @map("quality_grade")
+  remarks            String?
+  officerId          String   @map("officer_id")
+  officerName        String   @map("officer_name")
+  mspRatePerQuintal  Float    @map("msp_rate_per_quintal")
+  totalGrossAmount   Float    @map("total_gross_amount")
+  deductions         Float    @default(0)
+  netPayableAmount   Float    @map("net_payable_amount")
+  completedAt        DateTime @default(now()) @map("completed_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  booking Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  farmer  Farmer   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  crop    Crop     @relation(fields: [cropId], references: [id], onDelete: Cascade)
+  payment Payment?
+
+  @@map("procurement_records")
+}
+
+model Payment {
+  id                String   @id
+  procurementId     String   @unique @map("procurement_id")
+  bookingId         String   @unique @map("booking_id")
+  farmerId          String   @map("farmer_id")
+  amount            Float
+  status            String   @default("PENDING")
+  referenceId       String?  @map("reference_id")
+  paymentMode       String   @default("DBT / PFMS") @map("payment_mode")
+  bankAccountMasked String?  @map("bank_account_masked")
+  initiatedAt       String?  @map("initiated_at")
+  paidAt            String?  @map("paid_at")
+  statusMessage     String?  @map("status_message")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  procurement ProcurementRecord @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  booking     Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  farmer      Farmer            @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Notification {
+  id          String   @id
+  farmerId    String   @map("farmer_id")
+  type        String
+  title       String
+  message     String
+  timestamp   String
+  isRead      Boolean  @default(false) @map("is_read")
+  actionRoute String?  @map("action_route")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  farmer Farmer @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}

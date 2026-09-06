@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgriQueue | Smart Procurement & Virtual Queue Platform</title>
+    <!-- Google Font: Manrope -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- AgroIndiaMap Stylesheet -->
+    <link rel="stylesheet" href="/css/agro-india-map.css" />
+  </head>
+  <body class="bg-[#F8FAFC] text-[#111827] font-sans antialiased min-h-screen selection:bg-[#DCFCE7] selection:text-[#166534]">
+    <div id="root"></div>
+
+    <!-- D3.js & TopoJSON CDN -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
+
+    <!-- AgroIndiaMap Component Scripts -->
+    <script src="/js/embedded-map-data.js"></script>
+    <script src="/js/procurement-data.js"></script>
+    <script src="/js/agro-india-map.js"></script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
